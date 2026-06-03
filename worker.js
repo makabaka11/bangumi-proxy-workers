@@ -3,7 +3,13 @@
  * --------------------------------------------------
  * 代理：
  *   api.bgm.tv   (v0 REST API)   ->  你的 API 域名
+ *   next.bgm.tv  (评论等 API)     ->  你的 API 域名（自动按路径路由）
  *   lain.bgm.tv  (图片 CDN)       ->  你的图片域名
+ *
+ * 路由规则：所有请求共享 API 域名，Worker 按请求路径自动分流：
+ *   /v0/*                       ->  api.bgm.tv
+ *   /p1/xxx/comments 等评论接口   ->  next.bgm.tv
+ *   /*                          ->  lain.bgm.tv（图片域名）
  *
  * 关键点：API 返回的 JSON 里图片地址是写死的 lain.bgm.tv 绝对 URL，
  * 本 Worker 会自动把响应体里的 lain.bgm.tv 改写成你的图片域名，
@@ -16,7 +22,7 @@
  *     把上面填的两个域名都绑上去。
  *
  * 域名随便取、根域不限，只要这里填对哪个是 API、哪个是图片即可。
- * 调试：访问 https://你的域名/__health 查看识别到的角色和上游。
+ * 调试：访问 https://你的域名/abc123xyz/__health 查看识别到的角色和上游。
  */
 
 // ====== CONFIG（必填：填你的两个域名）======
@@ -30,6 +36,7 @@ const PATH_PREFIX = "abc123xyz";
 
 // 上游（不要改）
 const BGM_API = "api.bgm.tv";
+const BGM_API_NEXT = "next.bgm.tv";  // 评论等接口
 const BGM_IMG = "lain.bgm.tv";
 
 // 图片缓存时长（秒），默认 30 天
@@ -54,30 +61,40 @@ export default {
       url.pathname = url.pathname.slice(`/${PATH_PREFIX}`.length) || "/";
     }
 
-    const role = resolveRole(host);
+    // 图片域名 -> 图片代理
+    if (host === IMG_HOST) {
+      if (url.pathname === "/__health") {
+        return json({
+          ok: true, host, role: "img",
+          upstream: BGM_IMG,
+          apiHost: API_HOST, imgHost: IMG_HOST,
+          pathPrefix: PATH_PREFIX || "(disabled)",
+        });
+      }
+      return handleImage(request, url, ctx);
+    }
+
+    // API 域名 -> 按路径决定上游
+    const upstream = url.pathname.includes("/comments") ? BGM_API_NEXT : BGM_API;
 
     // 健康检查 / 调试
     if (url.pathname === "/__health") {
       return json({
-        ok: true,
-        host,
-        role,
-        upstream: role === "img" ? BGM_IMG : BGM_API,
-        apiHost: API_HOST,
-        imgHost: IMG_HOST,
+        ok: true, host,
+        role: "api",
+        upstream,
+        apiHost: API_HOST, imgHost: IMG_HOST,
         pathPrefix: PATH_PREFIX || "(disabled)",
       });
     }
 
-    return role === "img"
-      ? handleImage(request, url, ctx)
-      : handleApi(request, url);
+    return handleApi(request, url, upstream);
   },
 };
 
 // ---------- API：代理 + 改写响应体里的 lain.bgm.tv ----------
-async function handleApi(request, url) {
-  const upstreamURL = `https://${BGM_API}${url.pathname}${url.search}`;
+async function handleApi(request, url, upstream) {
+  const upstreamURL = `https://${upstream}${url.pathname}${url.search}`;
 
   const upstreamReq = new Request(upstreamURL, {
     method: request.method,
@@ -147,12 +164,6 @@ async function handleImage(request, url, ctx) {
 }
 
 // ---------- 工具函数 ----------
-function resolveRole(host) {
-  if (host === IMG_HOST) return "img";
-  if (host === API_HOST) return "api";
-  return "api"; // 未匹配的域名默认按 API 处理
-}
-
 function cleanRequestHeaders(h) {
   const out = new Headers(h);
   out.delete("host");
