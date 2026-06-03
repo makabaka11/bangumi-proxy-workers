@@ -2,7 +2,8 @@
 
 Cloudflare Worker 实现的反向代理，用于代理 Bangumi (bgm.tv) 的 API 和图片 CDN。
 
-- **API**：`api.bgm.tv` → 你的 API 域名
+- **主API**：`api.bgm.tv` → 你的 API 域名
+- **评论API**：`next.bgm.tv` → 你的 API 域名（同主API）
 - **图片**：`lain.bgm.tv` → 你的图片域名（带边缘缓存）
 - **自动改写**：API 响应中的图片链接自动替换为你的图片域名
 - **路径前缀保护**：可选的随机字符串路径前缀，防止未授权访问
