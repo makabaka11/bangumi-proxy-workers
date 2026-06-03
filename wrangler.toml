@@ -1,0 +1,4 @@
+name = "bangumi-proxy"
+main = "worker.js"
+compatibility_date = "2025-06-03"
+workers_dev = true
